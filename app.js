@@ -5,7 +5,6 @@ import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'ht
 const firebaseConfig = window.DAYFLOW_FIREBASE_CONFIG || {};
 const hasConfig = ['apiKey','authDomain','projectId','appId'].every(key=>typeof firebaseConfig[key]==='string' && firebaseConfig[key] && !firebaseConfig[key].startsWith('YOUR_'));
 const firebaseReady = hasConfig && firebaseConfig.authDomain.endsWith('.firebaseapp.com');
-const configured = !Object.values(firebaseConfig).some(value=>value.startsWith('YOUR_'));
 const $=selector=>document.querySelector(selector), $$=selector=>[...document.querySelectorAll(selector)];
 const authGate=$('#authGate'), plannerApp=$('#plannerApp'), authMessage=$('#authMessage');
 let auth=null, db=null, user=null, unsubscribe=null, items=[], selected='', cursor=null, view='month', itemType='task', editingId=null, toastTimer;
