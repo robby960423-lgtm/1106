@@ -1,0 +1,10 @@
+**
+!index.html
+!styles.css
+!app.js
+!firestore.rules
+!FIREBASE_SETUP.md
+!firebase.json
+!firebase-config.example.js
+!*.md
+!*.json
