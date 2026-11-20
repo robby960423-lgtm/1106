@@ -13,7 +13,7 @@ const toTime = minutes => `${String(Math.floor(minutes/60)).padStart(2,'0')}:${S
 const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value||'') && dateToISO(new Date(`${value}T12:00:00`))===value;
 const overlaps = (a,b) => a.date===b.date && minuteOf(a.time)<minuteOf(b.endTime) && minuteOf(a.endTime)>minuteOf(b.time);
 
-export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveItem, onPlanSaved }) {
+export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveItem, deleteItems, onPlanSaved }) {
   const panel=document.querySelector('#aiPanel');
   const fab=document.querySelector('#aiFab');
   const closeButton=document.querySelector('#aiClose');
@@ -27,7 +27,7 @@ export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveIt
   const consentButton=document.querySelector('#aiConsentAccept');
   const quickButtons=[...document.querySelectorAll('[data-ai-action]')];
 
-  let open=false, busy=false, mode='chat', planContext=null, pendingDraft=null, pendingPlan=null;
+  let open=false, busy=false, mode='chat', planContext=null, pendingDraft=null, pendingPlan=null, pendingDelete=null;
   const conversation=[];
   let textModel=null, jsonModel=null, initError='';
 
@@ -110,8 +110,8 @@ export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveIt
     if(code.includes('permission')||code.includes('permission-denied'))return 'Firebase AI Logic 尚未啟用或目前帳戶沒有使用權限。';
     return 'AI 暫時無法回應，請稍後再試。';
   }
-  function makeSystemPrompt(){return '你是日常 Dayflow 的繁體中文規劃助手。使用者的資料只可用於當前問題；不要假裝已經儲存或修改資料。新增或排程都只能提出草稿，必須等使用者在畫面按下確認。時間以 Asia/Taipei 為準；資訊不足時先提問，不要猜測。不要要求或重複密碼、驗證碼或其他機密。'}
-  function setMode(next){mode=next;const placeholders={chat:'詢問行程、待辦或輸入訊息…',create:'例如：明天下午 3 點和小林開會…',plan:'告訴我未設定預估時間的待辦需要多久…'};input.placeholder=placeholders[next]||placeholders.chat;}
+  function makeSystemPrompt(){return '你是日常 Dayflow 的繁體中文規劃助手。使用者的資料只可用於當前問題；不要假裝已經儲存、修改或刪除資料。新增、排程或刪除都必須先顯示草稿並等使用者在畫面按下確認。時間以 Asia/Taipei 為準；資訊不足時先提問，不要猜測。不要要求或重複密碼、驗證碼或其他機密。'}
+  function setMode(next){mode=next;const placeholders={chat:'詢問行程、待辦，或直接輸入新增／刪除指令…',create:'例如：明天下午 3 點和小林開會…',plan:'告訴我未設定預估時間的待辦需要多久…',delete:'例如：刪除明天的牙醫回診…'};input.placeholder=placeholders[next]||placeholders.chat;}
 
   async function summarizeToday(){
     if(!userCanUseAI())return;
@@ -133,7 +133,7 @@ export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveIt
   function draftDescription(draft){return draft.type==='event'?`${draft.name}\n${draft.date}　${draft.time}–${draft.endTime}\n分類：${categoryName(draft.category)}`:`${draft.name}\n到期日：${draft.date}\n分類：${categoryName(draft.category)}　提前 ${draft.reminder} 天提醒`;}
   async function confirmDraft(confirm,cancel){
     if(!pendingDraft)return;
-    try{const item={...pendingDraft,id:uid()};await saveItem(item);appendMessage('assistant',`已新增${item.type==='event'?'行程':'待辦'}「${item.name}」。`);pendingDraft=null;setStatus('已儲存至 Firestore。')}
+    try{const item={...pendingDraft,id:uid()};await saveItem(item);appendMessage('assistant',`已新增${item.type==='event'?'行程':'待辦'}「${item.name}」。`);pendingDraft=null;confirm.closest('.ai-action-card')?.remove();setStatus('已儲存至 Firestore。')}
     catch(error){console.error('Saving AI draft failed',error);setStatus('儲存失敗；資料沒有確認寫入，請重試。',true);confirm.disabled=false;cancel.disabled=false}
   }
   async function createFromText(message){
@@ -145,9 +145,41 @@ export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveIt
       if(!draft){setMode('create');setStatus('補充資訊後我會再整理。');return}
       pendingDraft=draft;setMode('chat');
       const conflicts=draft.type==='event'?getItems().filter(item=>item.type==='event'&&overlaps(item,draft)):[];
-      appendActionCard(draft.type==='event'?'行程草稿':'待辦草稿',draftDescription(draft),conflicts.length?'仍要新增':'確認新增',confirmDraft,()=>{pendingDraft=null;setStatus('已取消草稿。')},conflicts.length?`時間與「${conflicts.map(item=>item.name).join('、')}」重疊，請確認是否仍要新增。`:'' );
-      setStatus('草稿尚未寫入 Firestore。');
+      appendActionCard(draft.type==='event'?'行程草稿':'待辦草稿',draftDescription(draft),conflicts.length?'仍要新增':draft.type==='event'?'確認新增行程':'確認新增待辦',confirmDraft,()=>{pendingDraft=null;setStatus('已取消草稿。')},conflicts.length?`時間與「${conflicts.map(item=>item.name).join('、')}」重疊，請確認是否仍要新增。`:'' );
+      setStatus('草稿尚未寫入 Firestore；請在下方草稿卡按「確認新增」完成新增。');
     }catch(error){setStatus(error instanceof SyntaxError?'我無法確認草稿格式，請換個方式描述。':handleModelError(error),true)}finally{setBusy(false)}
+  }
+  async function confirmDelete(confirm,cancel){
+    if(!pendingDelete)return;
+    const selected=pendingDelete.item;
+    const all=getItems();
+    const current=all.find(item=>item.id===selected.id);
+    const linkedStillExist=pendingDelete.linkedEvents.every(event=>all.some(item=>item.id===event.id&&item.name===event.name&&item.date===event.date));
+    if(!current||current.type!==selected.type||current.name!==selected.name||current.date!==selected.date||!linkedStillExist){
+      pendingDelete=null;setStatus('這筆資料已變更或不存在，請重新描述要刪除的項目。',true);confirm.disabled=false;cancel.disabled=false;return;
+    }
+    try{
+      await deleteItems([selected.id,...pendingDelete.linkedEvents.map(event=>event.id)]);
+      appendMessage('assistant',`已刪除${selected.type==='event'?'行程':'待辦'}「${selected.name}」${pendingDelete.linkedEvents.length?`，並一併移除 ${pendingDelete.linkedEvents.length} 個 AI 專注時段`:''}。`);
+      pendingDelete=null;confirm.closest('.ai-action-card')?.remove();setStatus('已從 Firestore 刪除。');
+    }catch(error){console.error('Deleting AI selected item failed',error);setStatus('刪除失敗；資料尚未確認刪除，請重試。',true);confirm.disabled=false;cancel.disabled=false}
+  }
+  async function deleteFromText(message){
+    appendMessage('user',message);setBusy(true);
+    const candidates=getItems().filter(item=>item.type==='event'||item.type==='task').map(({id,type,name,date,time,endTime,done})=>({id,type,name,date,time:time||'',endTime:endTime||'',done:Boolean(done)}));
+    if(!candidates.length){appendMessage('assistant','目前沒有可刪除的行程或待辦。');setMode('chat');setStatus('沒有符合項目。');setBusy(false);return}
+    const prompt=`${makeSystemPrompt()}\n使用者要求刪除一筆行程或待辦。只可從候選資料中選一個最明確符合使用者描述的項目；絕不可猜測、編造或刪除多筆。名稱或日期不足以唯一辨識、候選有歧義、或沒有符合項目時，itemId 必須為 null，並在 reply 詢問具體名稱或日期。完成辨識時仍不可聲稱已刪除，只告訴使用者要先確認。只輸出 JSON：{"reply":"辨識結果或追問","itemId":null 或 "候選資料中的原始 id"}。最近對話：\n${modelHistory()}\n可刪除項目（不含備註）：${JSON.stringify(candidates)}`;
+    try{
+      const result=await generateJSON(prompt);
+      const selected=candidates.find(item=>item.id===result.itemId);
+      appendMessage('assistant',String(result.reply||(selected?'我找到一筆項目，請檢查下方內容並確認刪除。':'請提供名稱或日期，讓我辨識要刪除的項目。')));
+      if(!selected){setMode('delete');setStatus('尚未刪除；請補充項目名稱或日期。');return}
+      const linkedEvents=selected.type==='task'?getItems().filter(item=>item.type==='event'&&item.assistantGenerated===true&&item.linkedTaskId===selected.id):[];
+      pendingDelete={item:selected,linkedEvents};setMode('chat');
+      const details=selected.type==='event'?`${selected.name}\n${selected.date}　${selected.time||'全天'}${selected.endTime?`–${selected.endTime}`:''}`:`${selected.name}\n到期日：${selected.date}${selected.done?'\n狀態：已完成':''}${linkedEvents.length?`\nAI 專注時段也會一起移除：\n${linkedEvents.map(event=>`${event.date} ${event.time||''} ${event.name}`).join('\n')}`:''}`;
+      appendActionCard(`確認刪除${selected.type==='event'?'行程':'待辦'}`,details,`確認刪除${selected.type==='event'?'行程':'待辦'}`,confirmDelete,()=>{pendingDelete=null;setStatus('已取消刪除。')},'刪除後無法復原，請確認項目名稱與日期正確。');
+      setStatus('項目尚未刪除；請在下方卡片檢查內容後按「確認刪除」。');
+    }catch(error){setStatus(error instanceof SyntaxError?'我無法確認要刪除的項目，請補充名稱或日期。':handleModelError(error),true)}finally{setBusy(false)}
   }
   function getPlanContext(){
     const start=todayISO(),end=dateToISO(addDays(new Date(),7));
@@ -200,6 +232,11 @@ export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveIt
     if(!message||!userCanUseAI())return;
     if(mode==='create'){await createFromText(message);return}
     if(mode==='plan'){await arrangeTasks(message);return}
+    if(mode==='delete'){await deleteFromText(message);return}
+    const asksToDelete=/(刪除|刪掉|移除|清掉|清除|取消)/i.test(message);
+    if(asksToDelete){setMode('delete');await deleteFromText(message);return}
+    const asksToCreate=/(新增|建立|加上|加一個|加一筆|幫我加|幫我新增|幫我建立|排入)/i.test(message);
+    if(asksToCreate){setMode('create');await createFromText(message);return}
     appendMessage('user',message);setBusy(true);
     const referencesPlanner=/(行程|待辦|今天|明天|這週|本週|下週|空檔|安排|期限|到期|schedule|task|calendar)/i.test(message)||/(行程|待辦|空檔|安排)/i.test(modelHistory());
     const context=referencesPlanner?relevantContext(getItems(),7):null;
@@ -221,6 +258,7 @@ export function setupAIAssistant({ app, appCheckReady, getUser, getItems, saveIt
     if(action==='today'){setMode('chat');await summarizeToday()}
     else if(action==='create'){setMode('create');appendMessage('assistant','請描述要新增的行程或待辦。草稿會先顯示給你確認。');setStatus('輸入資料後按送出。');input.focus()}
     else if(action==='plan'){planContext=getPlanContext();setMode('plan');await arrangeTasks()}
+    else if(action==='delete'){setMode('delete');appendMessage('assistant','請描述要刪除的行程或待辦。我會先列出辨識結果，只有你按下確認刪除後才會執行。');setStatus('目前資料不會立即變更。');input.focus()}
   }));
   input.addEventListener('input',()=>{sendButton.disabled=busy||!input.value.trim()});
   form.addEventListener('submit',async event=>{event.preventDefault();const message=input.value.trim();if(!message||busy)return;input.value='';sendButton.disabled=true;await sendChatMessage(message);input.focus()});

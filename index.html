@@ -11,10 +11,10 @@
 </main></div>
 <button id="aiFab" class="ai-fab" type="button" aria-label="開啟 AI 助手" aria-controls="aiPanel" aria-expanded="false">✦</button>
 <section id="aiPanel" class="ai-panel" aria-label="Dayflow AI 助手" aria-hidden="true">
- <header class="ai-panel-head"><div><strong id="aiTitle">Dayflow AI 助手</strong><small>整理行程・新增項目・安排待辦</small></div><button id="aiClose" class="ai-close" type="button" aria-label="關閉 AI 助手">×</button></header>
- <div id="aiConsent" class="ai-consent" hidden><strong>使用免費 Gemini 前請先了解</strong><p>你輸入的訊息，以及功能需要的精簡行程／待辦資料，會傳送至 Google Gemini Developer API。免費方案提交的內容可能用於改善 Google 產品。AI 聊天只保留在此頁面工作階段；備註不會傳送，新增或排程需由你確認。</p><label><input id="aiConsentCheck" type="checkbox">我了解上述資料使用方式</label><button id="aiConsentAccept" type="button">我了解，開始使用</button></div>
- <div class="ai-quick-actions" aria-label="AI 快捷功能"><button type="button" data-ai-action="today">整理今天</button><button type="button" data-ai-action="create">文字新增</button><button type="button" data-ai-action="plan">安排待辦</button></div>
- <div id="aiMessages" class="ai-messages" role="log" aria-live="polite"><div class="ai-message assistant">嗨！我可以整理今天的安排、把文字轉成草稿，或幫你規劃待辦。</div></div>
+ <header class="ai-panel-head"><div><strong id="aiTitle">Dayflow AI 助手</strong><small>整理行程・新增刪除・安排待辦</small></div><button id="aiClose" class="ai-close" type="button" aria-label="關閉 AI 助手">×</button></header>
+ <div id="aiConsent" class="ai-consent" hidden><strong>使用免費 Gemini 前請先了解</strong><p>你輸入的訊息，以及功能需要的精簡行程／待辦資料，會傳送至 Google Gemini Developer API。免費方案提交的內容可能用於改善 Google 產品。AI 聊天只保留在此頁面工作階段；備註不會傳送，新增、排程或刪除都需由你確認。</p><label><input id="aiConsentCheck" type="checkbox">我了解上述資料使用方式</label><button id="aiConsentAccept" type="button">我了解，開始使用</button></div>
+ <div class="ai-quick-actions" aria-label="AI 快捷功能"><button type="button" data-ai-action="today">整理今天</button><button type="button" data-ai-action="create">文字新增</button><button type="button" data-ai-action="plan">安排待辦</button><button type="button" data-ai-action="delete">刪除項目</button></div>
+ <div id="aiMessages" class="ai-messages" role="log" aria-live="polite"><div class="ai-message assistant">嗨！可直接輸入要新增或刪除的項目，我會先列出草稿；確認按鈕會出現在下方草稿卡，按下後才會更新資料。</div></div>
  <p id="aiStatus" class="ai-status" role="status"></p>
  <form id="aiChatForm" class="ai-chat-form" hidden><label class="sr-only" for="aiInput">傳送訊息給 AI 助手</label><textarea id="aiInput" rows="2" maxlength="1200" placeholder="詢問行程、待辦或輸入訊息…"></textarea><button id="aiSend" type="submit" disabled>傳送</button></form>
 </section>
