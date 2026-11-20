@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 
 const firebaseConfig = window.DAYFLOW_FIREBASE_CONFIG || {};
@@ -7,7 +7,7 @@ const hasConfig = ['apiKey','authDomain','projectId','appId'].every(key=>typeof 
 const firebaseReady = hasConfig && firebaseConfig.authDomain.endsWith('.firebaseapp.com');
 const $=selector=>document.querySelector(selector), $$=selector=>[...document.querySelectorAll(selector)];
 const authGate=$('#authGate'), plannerApp=$('#plannerApp'), authMessage=$('#authMessage');
-let auth=null, db=null, user=null, unsubscribe=null, items=[], selected='', cursor=null, view='month', itemType='task', editingId=null, toastTimer;
+let auth=null, db=null, user=null, unsubscribe=null, items=[], selected='', cursor=null, view='month', itemType='task', editingId=null, toastTimer, signInInProgress=false, redirectAuthError=null;
 const now=new Date(); now.setHours(0,0,0,0);
 const toISO=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const fromISO=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
@@ -17,7 +17,23 @@ const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;
 const entries=d=>items.filter(x=>x.date===d), sort=a=>a.sort((x,y)=>(x.time||'99:99').localeCompare(y.time||'99:99'));
 const categoryName=c=>({work:'工作',personal:'個人',other:'其他'}[c]||'其他');
 const itemClass=x=>x.category==='personal'?'personal':x.category==='other'?'other':x.type==='task'?'task':'';
-function showAuth(message,error=false){authGate.hidden=false;plannerApp.hidden=true;authMessage.textContent=message||'登入後，你的資料會與帳戶綁定。';authMessage.classList.toggle('error',error);$('#googleSignIn').disabled=!firebaseReady}
+function setAuthStatus(message,error=false){authMessage.textContent=message;authMessage.classList.toggle('error',error)}
+function showAuth(message,error=false){authGate.hidden=false;plannerApp.hidden=true;setAuthStatus(message||'登入後，你的資料會與帳戶綁定。',error);$('#googleSignIn').disabled=!firebaseReady||signInInProgress;$('#lineSignIn').disabled=!firebaseReady||signInInProgress}
+function authErrorMessage(error,label='登入'){
+ const messages={
+  'auth/unauthorized-domain':'這個網站尚未加入 Firebase Authentication 的授權網域。',
+  'auth/operation-not-allowed':`${label}尚未在 Firebase Authentication 啟用。`,
+  'auth/popup-closed-by-user':'登入視窗已關閉，尚未完成登入。',
+  'auth/popup-blocked':'瀏覽器封鎖了登入視窗，請允許彈出視窗後重試。',
+  'auth/network-request-failed':'網路連線失敗，請確認連線後重試。',
+  'auth/account-exists-with-different-credential':'此帳戶已使用其他登入方式，請先使用原本的方式登入。',
+  'auth/invalid-credential':'登入憑證無效，請稍後重試或檢查 LINE channel 設定。',
+  'auth/too-many-requests':'嘗試次數過多，請稍後再試。',
+  'auth/cancelled-popup-request':'登入視窗已被另一個登入要求取代，請重試。'
+ };
+ if(error?.code==='auth/redirect-cancelled-by-user'||error?.code==='auth/user-cancelled')return '你已取消登入。';
+ return messages[error?.code]||`${label}失敗，請稍後重試。`;
+}
 function showPlanner(account){authGate.hidden=true;plannerApp.hidden=false;$('#profileName').textContent=account.displayName||'個人帳戶';$('#profileEmail').textContent=account.email||'已登入';$('#profileAvatar').textContent=(account.displayName||account.email||'日').slice(0,1).toLocaleUpperCase()}
 function userItems(){return collection(db,'users',user.uid,'plannerItems')}
 function startSync(){if(unsubscribe)unsubscribe();unsubscribe=onSnapshot(userItems(),snap=>{items=snap.docs.map(d=>({id:d.id,...d.data()}));render()},err=>{console.error(err);toast('同步失敗，請檢查 Firestore 規則')})}
@@ -36,5 +52,25 @@ $('#notifyBtn').onclick=async()=>{if(!('Notification'in window)){toast('此瀏�
 function openModal(type='task',id=null){editingId=id;const item=id?items.find(x=>x.id===id):null;itemType=item?.type||type;$('#modalTitle').textContent=item?'編輯項目':'新增項目';$$('.type-switch button').forEach(b=>b.classList.toggle('active',b.dataset.type===itemType));$('#name').value=item?.name||'';$('#date').value=item?.date||selected;$('#time').value=item?.time||'09:00';$('#endTime').value=item?.endTime||'10:00';$('#reminder').value=item?.reminder??1;$('#category').value=item?.category||'work';$('#note').value=item?.note||'';$('#deleteBtn').style.display=item?'block':'none';updateTypeFields();$('#backdrop').classList.add('open');setTimeout(()=>$('#name').focus(),30)}function updateTypeFields(){const task=itemType==='task';$('#timeField').style.display=task?'none':'grid';$('#endField').style.display=task?'none':'grid';$('#reminderField').style.display=task?'grid':'none';$('#reminderHint').style.display=task?'block':'none';$('#saveBtn').textContent=editingId?'儲存變更':task?'儲存待辦':'儲存行程'}function closeModal(){$('#backdrop').classList.remove('open');$('#itemForm').reset();editingId=null}$('#addBtn').onclick=()=>openModal();$('#closeBtn').onclick=closeModal;$('#cancelBtn').onclick=closeModal;$('#backdrop').onclick=e=>{if(e.target===$('#backdrop'))closeModal()};document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#backdrop').classList.contains('open'))closeModal()});$$('.type-switch button').forEach(b=>b.onclick=()=>{if(editingId){toast('編輯時無法變更項目類型');return}itemType=b.dataset.type;$$('.type-switch button').forEach(q=>q.classList.toggle('active',q===b));updateTypeFields()});
 $('#itemForm').onsubmit=async e=>{e.preventDefault();const item={id:editingId||uid(),type:itemType,name:$('#name').value.trim(),date:$('#date').value,category:$('#category').value,note:$('#note').value.trim()};if(itemType==='task')Object.assign(item,{reminder:Number($('#reminder').value),done:editingId?(items.find(x=>x.id===editingId)?.done||false):false});else Object.assign(item,{time:$('#time').value,endTime:$('#endTime').value});try{await saveItem(item);selected=item.date;const d=fromISO(item.date);cursor=new Date(d.getFullYear(),d.getMonth(),1);closeModal();toast(editingId?'已更新項目':'已新增項目')}catch(err){toast('儲存失敗，請檢查 Firebase 與 Firestore 規則');console.error(err)}};
 document.querySelector('.nav').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(!button)return;$$('.nav button').forEach(x=>x.classList.toggle('active',x===button));const tasksPage=button.dataset.page==='tasks',calendarPage=button.dataset.page==='calendar';$('#crumb').textContent=tasksPage?'待辦事項':calendarPage?'行事曆':'今日總覽';$('#greeting').textContent=calendarPage?'把時間，留給重要的事。':'今天，慢慢來也很好。';$('.greeting').hidden=tasksPage;$('.stats').hidden=tasksPage;$('.layout').hidden=tasksPage;$('#tasksPage').hidden=!tasksPage;if(calendarPage)view='month';else if(!tasksPage){selected=toISO(now);view='day'}renderCalendar();renderAgenda();renderTaskManager()});
-$('#googleSignIn').onclick=async()=>{if(!firebaseReady)return;authMessage.textContent='正在連接 Google…';authMessage.classList.remove('error');const provider=new GoogleAuthProvider();try{await signInWithPopup(auth,provider)}catch(error){if(error.code==='auth/popup-blocked'){try{await signInWithRedirect(auth,provider);return}catch(redirectError){error=redirectError}}authMessage.textContent='登入失敗：'+(error.message||error.code);authMessage.classList.add('error')}};$('#signOutBtn').onclick=()=>signOut(auth).catch(error=>toast('登出失敗：'+error.message));
-if(!firebaseReady){showAuth('Firebase 尚未設定。請依 FIREBASE_SETUP.md 設定專案後重新載入。',true)}else{const firebaseApp=initializeApp(firebaseConfig);auth=getAuth(firebaseApp);db=getFirestore(firebaseApp);getRedirectResult(auth).catch(error=>{authMessage.textContent='登入失敗：'+error.message;authMessage.classList.add('error')});onAuthStateChanged(auth,account=>{if(unsubscribe){unsubscribe();unsubscribe=null}user=account;if(account){selected=toISO(now);cursor=new Date(now.getFullYear(),now.getMonth(),1);showPlanner(account);startSync()}else{items=[];showAuth()}})}
+async function startSignIn(provider,label){
+ if(!firebaseReady||signInInProgress)return;
+ signInInProgress=true;$('#googleSignIn').disabled=true;$('#lineSignIn').disabled=true;redirectAuthError=null;
+ setAuthStatus('正在連接 '+label+'…');
+ try{await signInWithPopup(auth,provider)}catch(error){
+  if(error.code==='auth/popup-blocked'){
+   setAuthStatus('登入視窗遭到封鎖，正在改用重新導向…');
+   try{await signInWithRedirect(auth,provider);return}catch(redirectError){error=redirectError}
+  }
+  const cancelled=error.code==='auth/popup-closed-by-user'||error.code==='auth/redirect-cancelled-by-user'||error.code==='auth/user-cancelled';
+  setAuthStatus(authErrorMessage(error,label),!cancelled);
+ }finally{signInInProgress=false;$('#googleSignIn').disabled=!firebaseReady;$('#lineSignIn').disabled=!firebaseReady}
+}
+$('#googleSignIn').onclick=()=>startSignIn(new GoogleAuthProvider(),'Google');
+const lineProvider=new OAuthProvider('oidc.line');lineProvider.addScope('profile');
+$('#lineSignIn').onclick=()=>startSignIn(lineProvider,'LINE');
+$('#signOutBtn').onclick=()=>signOut(auth).catch(error=>toast('登出失敗：'+error.message));
+if(!firebaseReady){showAuth('Firebase 尚未設定。請依 FIREBASE_SETUP.md 設定專案後重新載入。',true)}else{
+ const firebaseApp=initializeApp(firebaseConfig);auth=getAuth(firebaseApp);db=getFirestore(firebaseApp);
+ getRedirectResult(auth).catch(error=>{redirectAuthError=error;if(!user)setAuthStatus(authErrorMessage(error),true)});
+ onAuthStateChanged(auth,account=>{if(unsubscribe){unsubscribe();unsubscribe=null}user=account;if(account){selected=toISO(now);cursor=new Date(now.getFullYear(),now.getMonth(),1);showPlanner(account);startSync()}else{items=[];showAuth(redirectAuthError?authErrorMessage(redirectAuthError):undefined,Boolean(redirectAuthError))}})
+}
