@@ -1,6 +1,8 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app-check.js';
+import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js';
+import { setupAIAssistant } from './ai-assistant.js';
 
 const firebaseConfig = window.DAYFLOW_FIREBASE_CONFIG || {};
 const hasConfig = ['apiKey','authDomain','projectId','appId'].every(key=>typeof firebaseConfig[key]==='string' && firebaseConfig[key] && !firebaseConfig[key].startsWith('YOUR_'));
@@ -70,7 +72,11 @@ const lineProvider=new OAuthProvider('oidc.line');lineProvider.addScope('profile
 $('#lineSignIn').onclick=()=>startSignIn(lineProvider,'LINE');
 $('#signOutBtn').onclick=()=>signOut(auth).catch(error=>toast('登出失敗：'+error.message));
 if(!firebaseReady){showAuth('Firebase 尚未設定。請依 FIREBASE_SETUP.md 設定專案後重新載入。',true)}else{
- const firebaseApp=initializeApp(firebaseConfig);auth=getAuth(firebaseApp);db=getFirestore(firebaseApp);
+ const firebaseApp=initializeApp(firebaseConfig);
+ let appCheckReady=false;const appCheckSiteKey=String(window.DAYFLOW_APPCHECK_SITE_KEY||'').trim();
+ if(appCheckSiteKey){try{initializeAppCheck(firebaseApp,{provider:new ReCaptchaEnterpriseProvider(appCheckSiteKey),isTokenAutoRefreshEnabled:true});appCheckReady=true}catch(error){console.error('Firebase App Check initialization failed',error)}}
+ auth=getAuth(firebaseApp);db=getFirestore(firebaseApp);
+ setupAIAssistant({app:firebaseApp,appCheckReady,getUser:()=>user,getItems:()=>items,saveItem:item=>saveItem(item),onPlanSaved:()=>{renderCalendar();renderAgenda();renderTaskManager()}});
  getRedirectResult(auth).catch(error=>{redirectAuthError=error;if(!user)setAuthStatus(authErrorMessage(error),true)});
  onAuthStateChanged(auth,account=>{if(unsubscribe){unsubscribe();unsubscribe=null}user=account;if(account){selected=toISO(now);cursor=new Date(now.getFullYear(),now.getMonth(),1);showPlanner(account);startSync()}else{items=[];showAuth(redirectAuthError?authErrorMessage(redirectAuthError):undefined,Boolean(redirectAuthError))}})
 }

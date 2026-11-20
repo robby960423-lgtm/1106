@@ -2,9 +2,11 @@
 !index.html
 !styles.css
 !app.js
+!ai-assistant.js
 !firestore.rules
 !FIREBASE_SETUP.md
 !firebase.json
 !firebase-config.example.js
 !*.md
 !*.json
+!.firebaserc
